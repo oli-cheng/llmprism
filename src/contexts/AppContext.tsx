@@ -4,6 +4,9 @@ import {
   Thread,
   Message,
   Settings,
+  ContextPack,
+  RoutingRule,
+  LayoutPreset,
   getWorkspaces,
   saveWorkspace,
   deleteWorkspace as deleteWorkspaceStorage,
@@ -14,13 +17,19 @@ import {
   saveMessage as saveMessageStorage,
   getSettings,
   saveSettings,
+  getContextPacks,
+  saveContextPack as saveContextPackStorage,
+  deleteContextPack as deleteContextPackStorage,
+  getRoutingRules,
+  saveRoutingRules,
+  searchAll,
   generateId,
   getEncryptedApiKeys,
   setEncryptedApiKeys,
   hasApiKeysStored,
   clearAllData,
 } from '@/lib/storage';
-import { encrypt, decrypt, getCachedPassphrase, cachePassphrase, setPassphraseUnlocked, isPassphraseSet } from '@/lib/crypto';
+import { encrypt, decrypt, getCachedPassphrase, cachePassphrase, setPassphraseUnlocked } from '@/lib/crypto';
 
 export type Preset = 'research' | 'code' | 'operator';
 
@@ -41,6 +50,9 @@ interface AppState {
   isUnlocked: boolean;
   hasStoredKeys: boolean;
   preset: Preset;
+  contextPacks: ContextPack[];
+  routingRules: RoutingRule[];
+  attachedContextPacks: string[];
 }
 
 interface AppContextType extends AppState {
@@ -55,12 +67,14 @@ interface AppContextType extends AppState {
   updateThread: (thread: Thread) => void;
   deleteThread: (id: string) => void;
   selectThread: (id: string) => void;
+  markThreadAsRead: (id: string) => void;
   
   // Message actions
   addMessage: (message: Omit<Message, 'id' | 'createdAt'>) => Message;
   
   // Settings
   updateSettings: (settings: Partial<Settings>) => void;
+  setLayoutPreset: (preset: LayoutPreset) => void;
   
   // API Keys
   unlockVault: (passphrase: string) => Promise<boolean>;
@@ -69,6 +83,18 @@ interface AppContextType extends AppState {
   
   // Preset
   setPreset: (preset: Preset) => void;
+  
+  // Context Packs
+  addContextPack: (pack: Omit<ContextPack, 'id' | 'createdAt' | 'updatedAt'>) => ContextPack;
+  updateContextPack: (pack: ContextPack) => void;
+  deleteContextPack: (id: string) => void;
+  toggleContextPackAttachment: (id: string) => void;
+  
+  // Routing Rules
+  updateRoutingRules: (rules: RoutingRule[]) => void;
+  
+  // Search
+  search: (query: string) => { threads: Thread[]; messages: Message[] };
   
   // Data management
   clearData: () => void;
@@ -102,11 +128,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [hasStoredKeys, setHasStoredKeys] = useState(hasApiKeysStored());
   const [preset, setPresetState] = useState<Preset>('research');
+  const [contextPacks, setContextPacks] = useState<ContextPack[]>([]);
+  const [routingRules, setRoutingRulesState] = useState<RoutingRule[]>([]);
+  const [attachedContextPacks, setAttachedContextPacks] = useState<string[]>([]);
 
   // Initialize
   useEffect(() => {
     const storedWorkspaces = getWorkspaces();
     setWorkspaces(storedWorkspaces);
+    setContextPacks(getContextPacks());
+    setRoutingRulesState(getRoutingRules());
     
     // Auto-unlock if passphrase is cached
     const cached = getCachedPassphrase();
@@ -121,26 +152,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const selectWorkspace = useCallback((id: string) => {
-    const workspace = workspaces.find(w => w.id === id);
+    const storedWorkspaces = getWorkspaces();
+    const workspace = storedWorkspaces.find(w => w.id === id);
     if (workspace) {
       setCurrentWorkspace(workspace);
       setPresetState(workspace.preset);
       const workspaceThreads = getThreadsByWorkspace(id);
       setThreads(workspaceThreads);
       if (workspaceThreads.length > 0) {
-        selectThread(workspaceThreads[0].id);
+        const thread = workspaceThreads[0];
+        setCurrentThread(thread);
+        setMessages(getMessagesByThread(thread.id));
       } else {
         setCurrentThread(null);
         setMessages([]);
       }
     }
-  }, [workspaces]);
+  }, []);
 
   const selectThread = useCallback((id: string) => {
-    const thread = threads.find(t => t.id === id);
+    const allThreads = getThreadsByWorkspace(currentWorkspace?.id || '');
+    const thread = allThreads.find(t => t.id === id);
     if (thread) {
       setCurrentThread(thread);
       setMessages(getMessagesByThread(id));
+      // Mark as read
+      if (thread.unread) {
+        const updatedThread = { ...thread, unread: false, lastReadAt: new Date().toISOString() };
+        saveThread(updatedThread);
+        setThreads(prev => prev.map(t => t.id === id ? updatedThread : t));
+      }
+    }
+  }, [currentWorkspace]);
+
+  const markThreadAsRead = useCallback((id: string) => {
+    const thread = threads.find(t => t.id === id);
+    if (thread && thread.unread) {
+      const updatedThread = { ...thread, unread: false, lastReadAt: new Date().toISOString() };
+      saveThread(updatedThread);
+      setThreads(prev => prev.map(t => t.id === id ? updatedThread : t));
     }
   }, [threads]);
 
@@ -191,6 +241,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       title: title || 'New Thread',
       tags: [],
       pinned: false,
+      unread: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -231,19 +282,47 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     saveMessageStorage(message);
     setMessages(prev => [...prev, message]);
     
-    // Update thread timestamp
+    // Update thread timestamp and mark as unread if assistant message
     if (currentThread) {
-      updateThread({ ...currentThread, updatedAt: new Date().toISOString() });
+      const updates: Partial<Thread> = { updatedAt: new Date().toISOString() };
+      if (messageData.role === 'assistant') {
+        updates.unread = true;
+      }
+      const updatedThread = { ...currentThread, ...updates };
+      saveThread(updatedThread);
+      setThreads(prev => prev.map(t => t.id === currentThread.id ? updatedThread : t));
+      setCurrentThread(updatedThread);
     }
     
     return message;
-  }, [currentThread, updateThread]);
+  }, [currentThread]);
 
   const updateSettings = useCallback((newSettings: Partial<Settings>) => {
     const updated = { ...settings, ...newSettings };
     saveSettings(updated);
     setSettings(updated);
   }, [settings]);
+
+  const setLayoutPreset = useCallback((layoutPreset: LayoutPreset) => {
+    let newSettings: Partial<Settings> = { layoutPreset };
+    
+    switch (layoutPreset) {
+      case 'single':
+        newSettings = { ...newSettings, showLeftPane: true, showRightPane: false };
+        break;
+      case 'split':
+        newSettings = { ...newSettings, showLeftPane: true, showRightPane: true };
+        break;
+      case 'compare':
+        newSettings = { ...newSettings, showLeftPane: false, showRightPane: true };
+        break;
+      case 'focus':
+        newSettings = { ...newSettings, showLeftPane: false, showRightPane: false };
+        break;
+    }
+    
+    updateSettings(newSettings);
+  }, [updateSettings]);
 
   const unlockVault = useCallback(async (passphrase: string): Promise<boolean> => {
     try {
@@ -271,7 +350,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setPassphraseUnlocked(false);
   }, []);
 
-  const saveApiKeys = useCallback(async (keys: ApiKeys, passphrase: string) => {
+  const saveApiKeysCallback = useCallback(async (keys: ApiKeys, passphrase: string) => {
     const encrypted = await encrypt(JSON.stringify(keys), passphrase);
     setEncryptedApiKeys(encrypted);
     setApiKeys(keys);
@@ -293,6 +372,47 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [currentWorkspace, updateWorkspace]);
 
+  // Context Packs
+  const addContextPack = useCallback((packData: Omit<ContextPack, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const pack: ContextPack = {
+      ...packData,
+      id: generateId(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    saveContextPackStorage(pack);
+    setContextPacks(prev => [...prev, pack]);
+    return pack;
+  }, []);
+
+  const updateContextPack = useCallback((pack: ContextPack) => {
+    saveContextPackStorage(pack);
+    setContextPacks(prev => prev.map(p => p.id === pack.id ? pack : p));
+  }, []);
+
+  const deleteContextPack = useCallback((id: string) => {
+    deleteContextPackStorage(id);
+    setContextPacks(prev => prev.filter(p => p.id !== id));
+    setAttachedContextPacks(prev => prev.filter(pid => pid !== id));
+  }, []);
+
+  const toggleContextPackAttachment = useCallback((id: string) => {
+    setAttachedContextPacks(prev => 
+      prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id]
+    );
+  }, []);
+
+  // Routing Rules
+  const updateRoutingRules = useCallback((rules: RoutingRule[]) => {
+    saveRoutingRules(rules);
+    setRoutingRulesState(rules);
+  }, []);
+
+  // Search
+  const search = useCallback((query: string) => {
+    return searchAll(query, currentWorkspace?.id);
+  }, [currentWorkspace]);
+
   const clearData = useCallback(() => {
     clearAllData();
     setWorkspaces([]);
@@ -303,6 +423,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setApiKeys({});
     setIsUnlocked(false);
     setHasStoredKeys(false);
+    setContextPacks([]);
+    setRoutingRulesState([]);
+    setAttachedContextPacks([]);
   }, []);
 
   return (
@@ -318,6 +441,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         isUnlocked,
         hasStoredKeys,
         preset,
+        contextPacks,
+        routingRules,
+        attachedContextPacks,
         createWorkspace,
         updateWorkspace,
         deleteWorkspace,
@@ -326,12 +452,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         updateThread,
         deleteThread,
         selectThread,
+        markThreadAsRead,
         addMessage,
         updateSettings,
+        setLayoutPreset,
         unlockVault,
         lockVault,
-        saveApiKeys,
+        saveApiKeys: saveApiKeysCallback,
         setPreset,
+        addContextPack,
+        updateContextPack,
+        deleteContextPack,
+        toggleContextPackAttachment,
+        updateRoutingRules,
+        search,
         clearData,
       }}
     >
