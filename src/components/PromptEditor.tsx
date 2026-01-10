@@ -1,10 +1,10 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { useApp, Preset } from '@/contexts/AppContext';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
+import { Progress } from '@/components/ui/progress';
 import {
   Select,
   SelectContent,
@@ -18,6 +18,12 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
   Play,
   ChevronDown,
   Settings2,
@@ -26,9 +32,15 @@ import {
   Briefcase,
   Loader2,
   AlertCircle,
+  X,
+  Check,
+  StopCircle,
+  Paperclip,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getAdapter, parseModelId, ModelResponse } from '@/lib/model-adapters';
+import { ModelResponse } from '@/lib/model-adapters';
+import { useMultiModelRun, ModelRunStatus } from '@/hooks/useMultiModelRun';
+import { estimateTokens } from '@/lib/storage';
 
 const PRESET_CONFIG: Record<Preset, { icon: React.ElementType; label: string; color: string }> = {
   research: { icon: Sparkles, label: 'Research Desk', color: 'text-blue-400' },
@@ -38,6 +50,47 @@ const PRESET_CONFIG: Record<Preset, { icon: React.ElementType; label: string; co
 
 interface PromptEditorProps {
   onResponses: (responses: ModelResponse[]) => void;
+}
+
+const AVAILABLE_MODELS = [
+  { id: 'openai:gpt-4o', label: 'GPT-4o', provider: 'openai' },
+  { id: 'openai:gpt-4o-mini', label: 'GPT-4o Mini', provider: 'openai' },
+  { id: 'anthropic:claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet', provider: 'anthropic' },
+  { id: 'anthropic:claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku', provider: 'anthropic' },
+  { id: 'gemini:gemini-1.5-pro', label: 'Gemini 1.5 Pro', provider: 'gemini' },
+  { id: 'gemini:gemini-1.5-flash', label: 'Gemini 1.5 Flash', provider: 'gemini' },
+];
+
+function ModelStatusIndicator({ status }: { status: ModelRunStatus }) {
+  return (
+    <div className="flex items-center gap-2 px-2 py-1 rounded bg-muted/50 text-xs">
+      <span className="font-medium">{status.provider}</span>
+      {status.status === 'pending' && (
+        <span className="text-muted-foreground">Waiting...</span>
+      )}
+      {status.status === 'running' && (
+        <Loader2 className="h-3 w-3 animate-spin text-primary" />
+      )}
+      {status.status === 'success' && (
+        <Check className="h-3 w-3 text-success" />
+      )}
+      {status.status === 'error' && (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger>
+              <AlertCircle className="h-3 w-3 text-destructive" />
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="max-w-xs">{status.error}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
+      {status.status === 'cancelled' && (
+        <X className="h-3 w-3 text-muted-foreground" />
+      )}
+    </div>
+  );
 }
 
 export function PromptEditor({ onResponses }: PromptEditorProps) {
@@ -50,24 +103,61 @@ export function PromptEditor({ onResponses }: PromptEditorProps) {
     preset,
     setPreset,
     addMessage,
+    contextPacks,
+    attachedContextPacks,
+    toggleContextPackAttachment,
   } = useApp();
 
   const [prompt, setPrompt] = useState('');
   const [selectedModels, setSelectedModels] = useState<string[]>(
     currentWorkspace?.defaultModels.slice(0, 2) || []
   );
-  const [isRunning, setIsRunning] = useState(false);
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [showContextPacks, setShowContextPacks] = useState(false);
 
-  const availableModels = [
-    { id: 'openai:gpt-4o', label: 'GPT-4o', provider: 'openai' },
-    { id: 'openai:gpt-4o-mini', label: 'GPT-4o Mini', provider: 'openai' },
-    { id: 'anthropic:claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet', provider: 'anthropic' },
-    { id: 'anthropic:claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku', provider: 'anthropic' },
-    { id: 'gemini:gemini-1.5-pro', label: 'Gemini 1.5 Pro', provider: 'gemini' },
-    { id: 'gemini:gemini-1.5-flash', label: 'Gemini 1.5 Flash', provider: 'gemini' },
-  ];
+  // Update selected models when workspace changes
+  useEffect(() => {
+    if (currentWorkspace?.defaultModels) {
+      setSelectedModels(currentWorkspace.defaultModels.slice(0, 2));
+    }
+  }, [currentWorkspace?.id]);
+
+  const { statuses, isRunning, run, cancel, reset } = useMultiModelRun({
+    apiKeys: apiKeys as Record<string, string | undefined>,
+    systemPrompt: currentWorkspace?.systemPrompt,
+    onResponse: (response) => {
+      if (currentThread) {
+        addMessage({
+          threadId: currentThread.id,
+          role: 'assistant',
+          provider: response.provider,
+          model: response.model,
+          content: response.content,
+          tokenUsage: {
+            prompt: response.usage.promptTokens,
+            completion: response.usage.completionTokens,
+            total: response.usage.totalTokens,
+          },
+        });
+      }
+    },
+  });
+
+  // Token estimation
+  const tokenEstimate = useMemo(() => {
+    const systemTokens = estimateTokens(currentWorkspace?.systemPrompt || '');
+    const promptTokens = estimateTokens(prompt);
+    const contextTokens = attachedContextPacks.reduce((acc, id) => {
+      const pack = contextPacks.find(p => p.id === id);
+      return acc + (pack ? estimateTokens(pack.content) : 0);
+    }, 0);
+    return {
+      system: systemTokens,
+      prompt: promptTokens,
+      context: contextTokens,
+      total: systemTokens + promptTokens + contextTokens,
+    };
+  }, [prompt, currentWorkspace?.systemPrompt, attachedContextPacks, contextPacks]);
 
   const toggleModel = (modelId: string) => {
     setSelectedModels(prev => {
@@ -84,8 +174,18 @@ export function PromptEditor({ onResponses }: PromptEditorProps) {
   const handleRun = useCallback(async () => {
     if (!prompt.trim() || !currentThread || selectedModels.length === 0) return;
 
-    setIsRunning(true);
-    setError(null);
+    // Build full prompt with context packs
+    let fullPrompt = prompt.trim();
+    if (attachedContextPacks.length > 0) {
+      const contextContent = attachedContextPacks
+        .map(id => {
+          const pack = contextPacks.find(p => p.id === id);
+          return pack ? `[Context: ${pack.name}]\n${pack.content}` : '';
+        })
+        .filter(Boolean)
+        .join('\n\n');
+      fullPrompt = `${contextContent}\n\n---\n\n${fullPrompt}`;
+    }
 
     // Add user message
     addMessage({
@@ -94,57 +194,10 @@ export function PromptEditor({ onResponses }: PromptEditorProps) {
       content: prompt.trim(),
     });
 
-    const responses: ModelResponse[] = [];
-    const errors: string[] = [];
-
-    // Run all selected models in parallel
-    await Promise.all(
-      selectedModels.map(async modelId => {
-        const { provider, model } = parseModelId(modelId);
-        const adapter = getAdapter(provider);
-        const apiKey = apiKeys[provider as keyof typeof apiKeys];
-
-        if (!adapter || !apiKey) {
-          errors.push(`${provider}: No API key configured`);
-          return;
-        }
-
-        try {
-          const response = await adapter.send(
-            model,
-            [{ role: 'user', content: prompt.trim() }],
-            { systemPrompt: currentWorkspace?.systemPrompt },
-            apiKey
-          );
-          responses.push(response);
-
-          // Add assistant message for this response
-          addMessage({
-            threadId: currentThread.id,
-            role: 'assistant',
-            provider,
-            model,
-            content: response.content,
-            tokenUsage: {
-              prompt: response.usage.promptTokens,
-              completion: response.usage.completionTokens,
-              total: response.usage.totalTokens,
-            },
-          });
-        } catch (err) {
-          errors.push(`${provider}: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        }
-      })
-    );
-
-    if (errors.length > 0) {
-      setError(errors.join('\n'));
-    }
-
+    const responses = await run(fullPrompt, selectedModels);
     onResponses(responses);
     setPrompt('');
-    setIsRunning(false);
-  }, [prompt, currentThread, selectedModels, apiKeys, currentWorkspace, addMessage, onResponses]);
+  }, [prompt, currentThread, selectedModels, attachedContextPacks, contextPacks, addMessage, run, onResponses]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -154,6 +207,11 @@ export function PromptEditor({ onResponses }: PromptEditorProps) {
   };
 
   const PresetIcon = PRESET_CONFIG[preset].icon;
+
+  const runningCount = statuses.filter(s => s.status === 'running' || s.status === 'pending').length;
+  const progressPercent = statuses.length > 0 
+    ? ((statuses.length - runningCount) / statuses.length) * 100 
+    : 0;
 
   return (
     <div className="flex flex-col h-full bg-card">
@@ -183,17 +241,30 @@ export function PromptEditor({ onResponses }: PromptEditorProps) {
           </div>
         </div>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setShowSystemPrompt(!showSystemPrompt)}
-        >
-          <Settings2 className="h-4 w-4 mr-2" />
-          System Prompt
-          <ChevronDown
-            className={cn('h-4 w-4 ml-1 transition-transform', showSystemPrompt && 'rotate-180')}
-          />
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowContextPacks(!showContextPacks)}
+            className={cn(attachedContextPacks.length > 0 && 'text-primary')}
+          >
+            <Paperclip className="h-4 w-4 mr-1" />
+            {attachedContextPacks.length > 0 && (
+              <span className="text-xs">{attachedContextPacks.length}</span>
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowSystemPrompt(!showSystemPrompt)}
+          >
+            <Settings2 className="h-4 w-4 mr-2" />
+            System Prompt
+            <ChevronDown
+              className={cn('h-4 w-4 ml-1 transition-transform', showSystemPrompt && 'rotate-180')}
+            />
+          </Button>
+        </div>
       </div>
 
       {/* System Prompt (collapsible) */}
@@ -206,6 +277,31 @@ export function PromptEditor({ onResponses }: PromptEditorProps) {
               className="min-h-[80px] text-sm font-mono resize-none bg-transparent border-dashed"
               placeholder="No system prompt set"
             />
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+
+      {/* Context Packs (collapsible) */}
+      <Collapsible open={showContextPacks} onOpenChange={setShowContextPacks}>
+        <CollapsibleContent>
+          <div className="p-4 border-b border-border bg-muted/30">
+            <div className="text-xs font-medium text-muted-foreground mb-2">Attach Context</div>
+            {contextPacks.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No context packs yet. Create one from the sidebar.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {contextPacks.map(pack => (
+                  <Badge
+                    key={pack.id}
+                    variant={attachedContextPacks.includes(pack.id) ? 'default' : 'outline'}
+                    className="cursor-pointer"
+                    onClick={() => toggleContextPackAttachment(pack.id)}
+                  >
+                    {pack.name}
+                  </Badge>
+                ))}
+              </div>
+            )}
           </div>
         </CollapsibleContent>
       </Collapsible>
@@ -252,10 +348,33 @@ export function PromptEditor({ onResponses }: PromptEditorProps) {
         </div>
       </ScrollArea>
 
+      {/* Running Status */}
+      {statuses.length > 0 && (
+        <div className="px-4 py-2 border-t border-border bg-muted/30">
+          <div className="flex items-center gap-2 mb-2">
+            {statuses.map(status => (
+              <ModelStatusIndicator key={status.modelId} status={status} />
+            ))}
+            {isRunning && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto text-destructive"
+                onClick={() => cancel()}
+              >
+                <StopCircle className="h-4 w-4 mr-1" />
+                Cancel All
+              </Button>
+            )}
+          </div>
+          {isRunning && <Progress value={progressPercent} className="h-1" />}
+        </div>
+      )}
+
       {/* Model Selection */}
       <div className="p-4 border-t border-border space-y-3">
         <div className="flex flex-wrap gap-2">
-          {availableModels.map(model => {
+          {AVAILABLE_MODELS.map(model => {
             const isSelected = selectedModels.includes(model.id);
             const hasKey = apiKeys[model.provider as keyof typeof apiKeys];
             return (
@@ -283,17 +402,20 @@ export function PromptEditor({ onResponses }: PromptEditorProps) {
             <span>Unlock your API keys to run prompts</span>
           </div>
         )}
-
-        {error && (
-          <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 p-2 rounded">
-            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-            <span className="whitespace-pre-wrap">{error}</span>
-          </div>
-        )}
       </div>
 
       {/* Prompt Input */}
       <div className="p-4 border-t border-border">
+        {/* Token Budget Indicator */}
+        {prompt.length > 0 && (
+          <div className="flex items-center gap-4 mb-2 text-xs text-muted-foreground">
+            <span>~{tokenEstimate.total.toLocaleString()} tokens</span>
+            <span className="text-[10px]">
+              (System: {tokenEstimate.system} | Prompt: {tokenEstimate.prompt} | Context: {tokenEstimate.context})
+            </span>
+            <span>{prompt.length.toLocaleString()} chars</span>
+          </div>
+        )}
         <div className="relative">
           <Textarea
             value={prompt}

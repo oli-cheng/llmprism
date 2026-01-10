@@ -8,8 +8,19 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { useApp, Preset } from '@/contexts/AppContext';
-import { Sparkles, Code2, Briefcase, ArrowRight, Shield } from 'lucide-react';
+import { 
+  Sparkles, 
+  Code2, 
+  Briefcase, 
+  ArrowRight, 
+  Shield,
+  Zap,
+  GitMerge,
+  Layers,
+  Check,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface OnboardingDialogProps {
@@ -41,8 +52,26 @@ const PRESETS = [
   },
 ];
 
+const FEATURES = [
+  {
+    icon: Zap,
+    title: 'Multi-Model Runs',
+    description: 'Run your prompt on multiple AI models simultaneously',
+  },
+  {
+    icon: GitMerge,
+    title: 'Merge Responses',
+    description: 'Select text from responses and merge into your final draft',
+  },
+  {
+    icon: Layers,
+    title: 'Context Packs',
+    description: 'Attach saved notes and documents to your prompts',
+  },
+];
+
 export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
-  const { createWorkspace, unlockVault, saveApiKeys } = useApp();
+  const { createWorkspace, createThread, addMessage, unlockVault, saveApiKeys } = useApp();
   const [step, setStep] = useState(1);
   const [workspaceName, setWorkspaceName] = useState('');
   const [selectedPreset, setSelectedPreset] = useState<Preset>('research');
@@ -51,7 +80,18 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
 
   const handleCreateWorkspace = () => {
     const name = workspaceName.trim() || 'My Workspace';
-    createWorkspace(name, selectedPreset);
+    const workspace = createWorkspace(name, selectedPreset);
+    
+    // Create a sample thread with demo content
+    const thread = createThread('Getting Started with Prism');
+    
+    // Add sample messages
+    addMessage({
+      threadId: thread.id,
+      role: 'user',
+      content: 'What are the key differences between GPT-4 and Claude 3.5 Sonnet for code generation?',
+    });
+    
     setStep(2);
   };
 
@@ -60,18 +100,21 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
       return;
     }
     await saveApiKeys({}, passphrase);
-    onComplete();
+    setStep(4);
   };
 
   const handleSkipPassphrase = async () => {
-    // Create empty vault with a random passphrase (user will set their own later)
     await unlockVault('temp-' + Math.random().toString(36));
+    setStep(4);
+  };
+
+  const handleComplete = () => {
     onComplete();
   };
 
   return (
     <Dialog open={open}>
-      <DialogContent className="max-w-md" onPointerDownOutside={e => e.preventDefault()}>
+      <DialogContent className="max-w-lg" onPointerDownOutside={e => e.preventDefault()}>
         {step === 1 && (
           <>
             <DialogHeader>
@@ -143,6 +186,53 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
           <>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
+                <Zap className="h-5 w-5 text-primary" />
+                How Prism Works
+              </DialogTitle>
+              <DialogDescription>
+                A quick tour of the key features
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 mt-4">
+              {FEATURES.map((feature, index) => {
+                const Icon = feature.icon;
+                return (
+                  <div key={index} className="flex gap-3 p-3 rounded-lg bg-muted/30">
+                    <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <Icon className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <div className="font-medium text-sm">{feature.title}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {feature.description}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div className="p-4 rounded-lg border border-primary/30 bg-primary/5">
+                <div className="text-sm font-medium mb-2">Quick Demo</div>
+                <div className="text-xs text-muted-foreground space-y-2">
+                  <p>1. Select 2+ models using the badges below the prompt input</p>
+                  <p>2. Type your prompt and press ⌘+Enter to run</p>
+                  <p>3. Select text from responses and click "Insert at Cursor" to merge</p>
+                </div>
+              </div>
+
+              <Button className="w-full" onClick={() => setStep(3)}>
+                Continue
+                <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+            </div>
+          </>
+        )}
+
+        {step === 3 && (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
                 <Shield className="h-5 w-5 text-primary" />
                 Secure Your Vault
               </DialogTitle>
@@ -191,6 +281,51 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
                   Set Passphrase
                 </Button>
               </div>
+            </div>
+          </>
+        )}
+
+        {step === 4 && (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Check className="h-5 w-5 text-success" />
+                You're All Set!
+              </DialogTitle>
+              <DialogDescription>
+                Add your API keys in Settings to start using Prism
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 mt-4">
+              <div className="p-4 rounded-lg bg-muted/30 space-y-3">
+                <div className="text-sm font-medium">Next Steps</div>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <div className="h-5 w-5 rounded-full bg-primary/20 flex items-center justify-center text-xs text-primary">1</div>
+                    <span>Open Settings (⌘K → Settings)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-5 w-5 rounded-full bg-primary/20 flex items-center justify-center text-xs text-primary">2</div>
+                    <span>Add your OpenAI, Anthropic, or Gemini API keys</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-5 w-5 rounded-full bg-primary/20 flex items-center justify-center text-xs text-primary">3</div>
+                    <span>Start prompting across multiple models!</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline">⌘K - Command Palette</Badge>
+                <Badge variant="outline">⌘1/2/3 - Switch Presets</Badge>
+                <Badge variant="outline">⌘↵ - Run Prompt</Badge>
+              </div>
+
+              <Button className="w-full" onClick={handleComplete}>
+                Get Started
+                <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
             </div>
           </>
         )}

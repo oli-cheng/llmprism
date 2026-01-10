@@ -8,6 +8,7 @@ const STORAGE_KEYS = {
   SETTINGS: 'prism_settings',
   SNIPPETS: 'prism_snippets',
   ROUTING_RULES: 'prism_routing_rules',
+  CONTEXT_PACKS: 'prism_context_packs',
 } as const;
 
 export interface Workspace {
@@ -27,6 +28,8 @@ export interface Thread {
   title: string;
   tags: string[];
   pinned: boolean;
+  unread: boolean;
+  lastReadAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -49,12 +52,24 @@ export interface Snippet {
   createdAt: string;
 }
 
+export interface ContextPack {
+  id: string;
+  name: string;
+  content: string;
+  type: 'note' | 'document' | 'code';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type LayoutPreset = 'single' | 'split' | 'compare' | 'focus';
+
 export interface Settings {
   theme: 'dark' | 'light';
   fontSize: number;
   editorWidth: 'narrow' | 'medium' | 'wide';
   showLeftPane: boolean;
   showRightPane: boolean;
+  layoutPreset: LayoutPreset;
 }
 
 export interface RoutingRule {
@@ -156,6 +171,35 @@ export function saveMessage(message: Message): void {
   setStorage(STORAGE_KEYS.MESSAGES, messages);
 }
 
+// Search across threads and messages
+export function searchAll(query: string, workspaceId?: string): { threads: Thread[]; messages: Message[] } {
+  const lowerQuery = query.toLowerCase();
+  const allThreads = workspaceId 
+    ? getThreads().filter(t => t.workspaceId === workspaceId)
+    : getThreads();
+  const allMessages = getMessages();
+  
+  const matchingThreads = allThreads.filter(t =>
+    t.title.toLowerCase().includes(lowerQuery) ||
+    t.tags.some(tag => tag.toLowerCase().includes(lowerQuery))
+  );
+  
+  const matchingMessages = allMessages.filter(m =>
+    m.content.toLowerCase().includes(lowerQuery)
+  );
+  
+  // Also include threads that have matching messages
+  const threadIdsWithMessages = new Set(matchingMessages.map(m => m.threadId));
+  const additionalThreads = allThreads.filter(t => 
+    threadIdsWithMessages.has(t.id) && !matchingThreads.some(mt => mt.id === t.id)
+  );
+  
+  return {
+    threads: [...matchingThreads, ...additionalThreads],
+    messages: matchingMessages,
+  };
+}
+
 // API Keys (encrypted)
 export function getEncryptedApiKeys(): string | null {
   return localStorage.getItem(STORAGE_KEYS.API_KEYS);
@@ -177,6 +221,7 @@ export function getSettings(): Settings {
     editorWidth: 'medium',
     showLeftPane: true,
     showRightPane: true,
+    layoutPreset: 'split',
   });
 }
 
@@ -205,6 +250,27 @@ export function deleteSnippet(id: string): void {
   setStorage(STORAGE_KEYS.SNIPPETS, snippets);
 }
 
+// Context Packs
+export function getContextPacks(): ContextPack[] {
+  return getStorage<ContextPack[]>(STORAGE_KEYS.CONTEXT_PACKS, []);
+}
+
+export function saveContextPack(pack: ContextPack): void {
+  const packs = getContextPacks();
+  const index = packs.findIndex(p => p.id === pack.id);
+  if (index >= 0) {
+    packs[index] = { ...pack, updatedAt: new Date().toISOString() };
+  } else {
+    packs.push(pack);
+  }
+  setStorage(STORAGE_KEYS.CONTEXT_PACKS, packs);
+}
+
+export function deleteContextPack(id: string): void {
+  const packs = getContextPacks().filter(p => p.id !== id);
+  setStorage(STORAGE_KEYS.CONTEXT_PACKS, packs);
+}
+
 // Routing Rules
 export function getRoutingRules(): RoutingRule[] {
   return getStorage<RoutingRule[]>(STORAGE_KEYS.ROUTING_RULES, [
@@ -212,14 +278,14 @@ export function getRoutingRules(): RoutingRule[] {
       id: 'default-code',
       name: 'Code Bench - Claude for long code',
       condition: { preset: 'code', contentLength: 'long' },
-      preferredModels: ['claude-3-5-sonnet-20241022', 'gpt-4o', 'gemini-1.5-pro'],
+      preferredModels: ['anthropic:claude-3-5-sonnet-20241022', 'openai:gpt-4o', 'gemini:gemini-1.5-pro'],
       enabled: true,
     },
     {
       id: 'default-research',
       name: 'Research - GPT-4 primary',
       condition: { preset: 'research' },
-      preferredModels: ['gpt-4o', 'claude-3-5-sonnet-20241022'],
+      preferredModels: ['openai:gpt-4o', 'anthropic:claude-3-5-sonnet-20241022'],
       enabled: true,
     },
   ]);
@@ -240,4 +306,9 @@ export function clearAllData(): void {
 // Generate IDs
 export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Token estimation (rough approximation: ~4 chars per token)
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
 }

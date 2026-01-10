@@ -9,14 +9,13 @@ import {
   CommandSeparator,
 } from '@/components/ui/command';
 import { useApp, Preset } from '@/contexts/AppContext';
+import { LayoutPreset } from '@/lib/storage';
 import {
   Plus,
   Folder,
   MessageSquare,
   Settings,
   Trash2,
-  Play,
-  FileText,
   Sparkles,
   Code2,
   Briefcase,
@@ -24,22 +23,33 @@ import {
   PanelRight,
   Lock,
   Unlock,
+  Layout,
+  Columns,
+  Maximize,
+  Download,
+  Route,
+  FileText,
 } from 'lucide-react';
 
 interface CommandPaletteProps {
   onOpenSettings: () => void;
+  onOpenRoutingRules?: () => void;
 }
 
-export function CommandPalette({ onOpenSettings }: CommandPaletteProps) {
+export function CommandPalette({ onOpenSettings, onOpenRoutingRules }: CommandPaletteProps) {
   const [open, setOpen] = useState(false);
   const {
     workspaces,
+    threads,
     selectWorkspace,
+    selectThread,
     createWorkspace,
     createThread,
     currentWorkspace,
+    currentThread,
     settings,
     updateSettings,
+    setLayoutPreset,
     setPreset,
     isUnlocked,
     lockVault,
@@ -72,11 +82,26 @@ export function CommandPalette({ onOpenSettings }: CommandPaletteProps) {
       case 'settings':
         onOpenSettings();
         break;
+      case 'routing-rules':
+        onOpenRoutingRules?.();
+        break;
       case 'toggle-left':
         updateSettings({ showLeftPane: !settings.showLeftPane });
         break;
       case 'toggle-right':
         updateSettings({ showRightPane: !settings.showRightPane });
+        break;
+      case 'layout-single':
+        setLayoutPreset('single');
+        break;
+      case 'layout-split':
+        setLayoutPreset('split');
+        break;
+      case 'layout-compare':
+        setLayoutPreset('compare');
+        break;
+      case 'layout-focus':
+        setLayoutPreset('focus');
         break;
       case 'preset-research':
         setPreset('research');
@@ -90,6 +115,22 @@ export function CommandPalette({ onOpenSettings }: CommandPaletteProps) {
       case 'lock':
         lockVault();
         break;
+      case 'export':
+        // Export current thread messages
+        if (currentThread) {
+          const blob = new Blob([JSON.stringify({ thread: currentThread, messages: [] }, null, 2)], {
+            type: 'application/json',
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${currentThread.title.replace(/\s+/g, '-')}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+        break;
       case 'clear-data':
         if (confirm('This will delete ALL local data including workspaces, threads, and API keys. Continue?')) {
           clearData();
@@ -101,6 +142,11 @@ export function CommandPalette({ onOpenSettings }: CommandPaletteProps) {
   const handleSelectWorkspace = (id: string) => {
     setOpen(false);
     selectWorkspace(id);
+  };
+
+  const handleSelectThread = (id: string) => {
+    setOpen(false);
+    selectThread(id);
   };
 
   return (
@@ -124,6 +170,47 @@ export function CommandPalette({ onOpenSettings }: CommandPaletteProps) {
           <CommandItem onSelect={() => handleSelect('settings')}>
             <Settings className="mr-2 h-4 w-4" />
             Open Settings
+          </CommandItem>
+          <CommandItem onSelect={() => handleSelect('routing-rules')}>
+            <Route className="mr-2 h-4 w-4" />
+            Routing Rules
+          </CommandItem>
+          <CommandItem onSelect={() => handleSelect('export')} disabled={!currentThread}>
+            <Download className="mr-2 h-4 w-4" />
+            Export Thread
+          </CommandItem>
+        </CommandGroup>
+
+        <CommandSeparator />
+
+        <CommandGroup heading="Layout">
+          <CommandItem onSelect={() => handleSelect('layout-single')}>
+            <Layout className="mr-2 h-4 w-4" />
+            Single Pane
+            {settings.layoutPreset === 'single' && (
+              <span className="ml-auto text-xs text-primary">Active</span>
+            )}
+          </CommandItem>
+          <CommandItem onSelect={() => handleSelect('layout-split')}>
+            <Columns className="mr-2 h-4 w-4" />
+            Split View
+            {settings.layoutPreset === 'split' && (
+              <span className="ml-auto text-xs text-primary">Active</span>
+            )}
+          </CommandItem>
+          <CommandItem onSelect={() => handleSelect('layout-compare')}>
+            <FileText className="mr-2 h-4 w-4" />
+            Compare View
+            {settings.layoutPreset === 'compare' && (
+              <span className="ml-auto text-xs text-primary">Active</span>
+            )}
+          </CommandItem>
+          <CommandItem onSelect={() => handleSelect('layout-focus')}>
+            <Maximize className="mr-2 h-4 w-4" />
+            Focus Mode
+            {settings.layoutPreset === 'focus' && (
+              <span className="ml-auto text-xs text-primary">Active</span>
+            )}
           </CommandItem>
         </CommandGroup>
 
@@ -159,6 +246,26 @@ export function CommandPalette({ onOpenSettings }: CommandPaletteProps) {
             Toggle Right Pane
           </CommandItem>
         </CommandGroup>
+
+        {threads.length > 0 && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="Switch Thread">
+              {threads.slice(0, 10).map(thread => (
+                <CommandItem
+                  key={thread.id}
+                  onSelect={() => handleSelectThread(thread.id)}
+                >
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                  {thread.title}
+                  {thread.unread && (
+                    <span className="ml-auto h-2 w-2 rounded-full bg-primary" />
+                  )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
 
         {workspaces.length > 0 && (
           <>

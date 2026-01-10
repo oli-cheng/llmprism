@@ -3,24 +3,36 @@ import { useApp } from '@/contexts/AppContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Badge } from '@/components/ui/badge';
 import {
   Folder,
   Plus,
   Search,
   Pin,
-  Tag,
   MoreHorizontal,
   Trash2,
   Edit2,
   MessageSquare,
   FolderPlus,
+  Tag,
+  Circle,
+  FileText,
+  X,
 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
 export function Sidebar() {
@@ -36,13 +48,19 @@ export function Sidebar() {
     deleteWorkspace,
     deleteThread,
     updateThread,
+    search,
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [tagThreadId, setTagThreadId] = useState<string | null>(null);
+  const [newTag, setNewTag] = useState('');
 
-  const filteredThreads = threads.filter(
+  // Search across threads and message content
+  const searchResults = searchQuery ? search(searchQuery) : null;
+  const filteredThreads = searchResults?.threads || threads.filter(
     t =>
       t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       t.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -62,6 +80,23 @@ export function Sidebar() {
     }
     setEditingThreadId(null);
     setEditTitle('');
+  };
+
+  const handleAddTag = (threadId: string) => {
+    const thread = threads.find(t => t.id === threadId);
+    if (thread && newTag.trim() && !thread.tags.includes(newTag.trim())) {
+      updateThread({ ...thread, tags: [...thread.tags, newTag.trim()] });
+    }
+    setNewTag('');
+    setTagDialogOpen(false);
+    setTagThreadId(null);
+  };
+
+  const handleRemoveTag = (threadId: string, tag: string) => {
+    const thread = threads.find(t => t.id === threadId);
+    if (thread) {
+      updateThread({ ...thread, tags: thread.tags.filter(t => t !== tag) });
+    }
   };
 
   return (
@@ -145,12 +180,18 @@ export function Sidebar() {
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
-              placeholder="Search threads..."
+              placeholder="Search threads & messages..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="h-8 pl-8 text-sm bg-sidebar-accent border-0"
             />
           </div>
+          
+          {searchQuery && searchResults && (
+            <div className="text-xs text-muted-foreground">
+              Found {searchResults.threads.length} threads, {searchResults.messages.length} messages
+            </div>
+          )}
         </div>
 
         <ScrollArea className="flex-1 px-3 pb-3">
@@ -166,7 +207,12 @@ export function Sidebar() {
                 )}
                 onClick={() => selectThread(thread.id)}
               >
-                <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <div className="relative">
+                  <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  {thread.unread && (
+                    <Circle className="absolute -top-1 -right-1 h-2 w-2 fill-primary text-primary" />
+                  )}
+                </div>
                 <div className="flex-1 min-w-0">
                   {editingThreadId === thread.id ? (
                     <Input
@@ -185,14 +231,24 @@ export function Sidebar() {
                     <span className="text-sm truncate block">{thread.title}</span>
                   )}
                   {thread.tags.length > 0 && (
-                    <div className="flex gap-1 mt-0.5">
-                      {thread.tags.slice(0, 2).map(tag => (
-                        <span
+                    <div className="flex gap-1 mt-0.5 flex-wrap">
+                      {thread.tags.slice(0, 3).map(tag => (
+                        <Badge
                           key={tag}
-                          className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground"
+                          variant="secondary"
+                          className="text-[10px] px-1.5 py-0 h-4"
                         >
                           {tag}
-                        </span>
+                          <button
+                            className="ml-1 opacity-0 group-hover:opacity-100"
+                            onClick={e => {
+                              e.stopPropagation();
+                              handleRemoveTag(thread.id, tag);
+                            }}
+                          >
+                            <X className="h-2 w-2" />
+                          </button>
+                        </Badge>
                       ))}
                     </div>
                   )}
@@ -230,6 +286,40 @@ export function Sidebar() {
                         <Edit2 className="h-4 w-4 mr-2" />
                         Rename
                       </DropdownMenuItem>
+                      <Dialog open={tagDialogOpen && tagThreadId === thread.id} onOpenChange={(open) => {
+                        setTagDialogOpen(open);
+                        if (!open) setTagThreadId(null);
+                      }}>
+                        <DialogTrigger asChild>
+                          <DropdownMenuItem
+                            onSelect={e => {
+                              e.preventDefault();
+                              setTagThreadId(thread.id);
+                              setTagDialogOpen(true);
+                            }}
+                          >
+                            <Tag className="h-4 w-4 mr-2" />
+                            Add Tag
+                          </DropdownMenuItem>
+                        </DialogTrigger>
+                        <DialogContent className="max-w-xs">
+                          <DialogHeader>
+                            <DialogTitle>Add Tag</DialogTitle>
+                          </DialogHeader>
+                          <div className="flex gap-2">
+                            <Input
+                              placeholder="Tag name"
+                              value={newTag}
+                              onChange={e => setNewTag(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') handleAddTag(thread.id);
+                              }}
+                            />
+                            <Button onClick={() => handleAddTag(thread.id)}>Add</Button>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                      <DropdownMenuSeparator />
                       <DropdownMenuItem
                         className="text-destructive"
                         onClick={e => {
