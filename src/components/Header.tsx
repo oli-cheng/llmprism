@@ -9,14 +9,23 @@ import {
   ShieldOff,
   PanelLeft,
   PanelRight,
+  Route,
+  LayoutGrid,
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
 interface HeaderProps {
   onOpenSettings: () => void;
+  onOpenRoutingRules: () => void;
 }
 
-export function Header({ onOpenSettings }: HeaderProps) {
+export function Header({ onOpenSettings, onOpenRoutingRules }: HeaderProps) {
   const { isUnlocked, settings, updateSettings, currentWorkspace } = useApp();
 
   return (
@@ -82,6 +91,11 @@ export function Header({ onOpenSettings }: HeaderProps) {
           onClick={() => updateSettings({ showRightPane: !settings.showRightPane })}
         >
           <PanelRight className="h-4 w-4" />
+        </Button>
+
+        {/* Routing Rules */}
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onOpenRoutingRules}>
+          <Route className="h-4 w-4" />
         </Button>
 
         {/* Settings */}
