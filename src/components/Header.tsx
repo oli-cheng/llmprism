@@ -34,9 +34,9 @@ export function Header({ onOpenSettings, onOpenRoutingRules }: HeaderProps) {
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
           <div className="h-6 w-6 rounded bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
-            <span className="text-xs font-bold text-primary-foreground">P</span>
+            <span className="text-xs font-bold text-primary-foreground">L</span>
           </div>
-          <span className="font-semibold tracking-tight">Prism</span>
+          <span className="font-semibold tracking-tight">LLMPrism</span>
         </div>
         {currentWorkspace && (
           <>

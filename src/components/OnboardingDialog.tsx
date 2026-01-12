@@ -83,7 +83,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
     const workspace = createWorkspace(name, selectedPreset);
     
     // Create a sample thread with demo content
-    const thread = createThread('Getting Started with Prism');
+    const thread = createThread('Getting Started with LLMPrism');
     
     // Add sample messages
     addMessage({
@@ -120,9 +120,9 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-xl">
                 <div className="h-8 w-8 rounded bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
-                  <span className="text-sm font-bold text-primary-foreground">P</span>
+                  <span className="text-sm font-bold text-primary-foreground">L</span>
                 </div>
-                Welcome to Prism
+                Welcome to LLMPrism
               </DialogTitle>
               <DialogDescription>
                 Your neutral cockpit for multi-model AI workflows
@@ -187,7 +187,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Zap className="h-5 w-5 text-primary" />
-                How Prism Works
+                How LLMPrism Works
               </DialogTitle>
               <DialogDescription>
                 A quick tour of the key features
@@ -293,7 +293,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
                 You're All Set!
               </DialogTitle>
               <DialogDescription>
-                Add your API keys in Settings to start using Prism
+                Add your API keys in Settings to start using LLMPrism
               </DialogDescription>
             </DialogHeader>
 
