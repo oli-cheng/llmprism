@@ -20,6 +20,10 @@ export interface ModelResponse {
   };
   provider: string;
   model: string;
+  // Demo mode metadata
+  isMock?: boolean;
+  latencyMs?: number;
+  estimatedCost?: number;
 }
 
 export interface ModelAdapter {

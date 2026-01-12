@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { useApp } from '@/contexts/AppContext';
 import { getAdapter } from '@/lib/model-adapters';
 import {
@@ -22,6 +23,7 @@ import {
   EyeOff,
   Shield,
   AlertTriangle,
+  Beaker,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -66,6 +68,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     hasStoredKeys,
     unlockVault,
     saveApiKeys,
+    settings,
+    updateSettings,
   } = useApp();
 
   const [passphrase, setPassphrase] = useState('');
@@ -161,8 +165,44 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         <Tabs defaultValue="keys" className="mt-4">
           <TabsList className="w-full">
             <TabsTrigger value="keys" className="flex-1">API Keys</TabsTrigger>
+            <TabsTrigger value="demo" className="flex-1">Demo Mode</TabsTrigger>
             <TabsTrigger value="privacy" className="flex-1">Privacy</TabsTrigger>
           </TabsList>
+
+          {/* Demo Mode Tab */}
+          <TabsContent value="demo" className="space-y-4 mt-4">
+            <div className="p-4 rounded-lg border border-border bg-muted/30 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Beaker className="h-5 w-5 text-warning" />
+                  <span className="font-medium">Demo Mode</span>
+                </div>
+                <Switch
+                  checked={settings.demoMode}
+                  onCheckedChange={(checked) => updateSettings({ demoMode: checked })}
+                />
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Enable Demo Mode to test LLMPrism without API keys. Responses are realistic mock data with simulated latency and token counts.
+              </p>
+              {settings.demoMode && (
+                <Badge variant="outline" className="text-warning border-warning/50">
+                  <Beaker className="h-3 w-3 mr-1" />
+                  Demo Mode Active - Responses are simulated
+                </Badge>
+              )}
+            </div>
+            <div className="p-4 rounded-lg border border-border space-y-2">
+              <div className="text-sm font-medium">What Demo Mode includes:</div>
+              <ul className="text-sm text-muted-foreground space-y-1">
+                <li>• Realistic AI responses with proper formatting</li>
+                <li>• Simulated latency (0.6-2.5s per provider)</li>
+                <li>• Token counts and cost estimates</li>
+                <li>• Occasional errors to demonstrate retry UX</li>
+                <li>• Full workflow: run → compare → merge → export</li>
+              </ul>
+            </div>
+          </TabsContent>
 
           <TabsContent value="keys" className="space-y-4 mt-4">
             {/* Unlock / Create Passphrase */}
