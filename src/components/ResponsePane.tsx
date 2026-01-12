@@ -12,6 +12,9 @@ import {
   Sparkles,
   Plus,
   MousePointer2,
+  Clock,
+  DollarSign,
+  Beaker,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ModelResponse } from '@/lib/model-adapters';
@@ -27,6 +30,14 @@ export function ResponsePane({ responses }: ResponsePaneProps) {
   const [copiedTab, setCopiedTab] = useState<string | null>(null);
   const [selectedText, setSelectedText] = useState<{ text: string; responseIndex: number } | null>(null);
   const finalTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const cursorPositionRef = useRef<number>(0);
+
+  // Track cursor position when textarea is focused
+  const handleFinalSelect = useCallback(() => {
+    if (finalTextareaRef.current) {
+      cursorPositionRef.current = finalTextareaRef.current.selectionStart;
+    }
+  }, []);
 
   // Update active tab when new responses come in
   React.useEffect(() => {
@@ -51,22 +62,33 @@ export function ResponsePane({ responses }: ResponsePaneProps) {
   }, []);
 
   const handleInsertAtCursor = useCallback(() => {
-    if (!selectedText || !finalTextareaRef.current) return;
+    if (!selectedText) return;
 
     const textarea = finalTextareaRef.current;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const before = finalContent.slice(0, start);
-    const after = finalContent.slice(end);
+    let insertPosition = cursorPositionRef.current;
+    
+    // If no valid cursor position, insert at end
+    if (!textarea || insertPosition === undefined || insertPosition < 0) {
+      insertPosition = finalContent.length;
+      toast.info('Inserted at end (no cursor position set)');
+    }
+
+    const before = finalContent.slice(0, insertPosition);
+    const after = finalContent.slice(insertPosition);
     
     const newContent = before + selectedText.text + after;
     setFinalContent(newContent);
     
-    // Move cursor to end of inserted text
+    // Update cursor position ref
+    cursorPositionRef.current = insertPosition + selectedText.text.length;
+
+    // Focus and set cursor after state update
     setTimeout(() => {
-      textarea.focus();
-      const newPosition = start + selectedText.text.length;
-      textarea.setSelectionRange(newPosition, newPosition);
+      if (textarea) {
+        textarea.focus();
+        const newPosition = insertPosition + selectedText.text.length;
+        textarea.setSelectionRange(newPosition, newPosition);
+      }
     }, 0);
 
     setSelectedText(null);
@@ -85,13 +107,17 @@ export function ResponsePane({ responses }: ResponsePaneProps) {
   }, []);
 
   const handleExport = (format: 'md' | 'txt') => {
+    if (!finalContent) {
+      toast.error('No content to export');
+      return;
+    }
     const blob = new Blob([finalContent], {
       type: format === 'md' ? 'text/markdown' : 'text/plain',
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `export.${format}`;
+    a.download = `llmprism-export-${Date.now()}.${format}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -114,10 +140,12 @@ export function ResponsePane({ responses }: ResponsePaneProps) {
 
   if (responses.length === 0) {
     return (
-      <div className="flex flex-col h-full bg-card items-center justify-center text-muted-foreground">
-        <Sparkles className="h-16 w-16 mb-4 opacity-20" />
-        <p className="text-sm">Run a prompt to see responses</p>
-        <p className="text-xs mt-1">Compare outputs from multiple models side by side</p>
+      <div className="flex flex-col h-full bg-card items-center justify-center text-muted-foreground p-6">
+        <Sparkles className="h-12 w-12 mb-4 opacity-20" />
+        <p className="text-sm font-medium">Run a prompt to compare</p>
+        <p className="text-xs mt-1 text-center max-w-[200px]">
+          Select 2-3 models and click Run to see responses side by side
+        </p>
       </div>
     );
   }
@@ -127,15 +155,15 @@ export function ResponsePane({ responses }: ResponsePaneProps) {
       {/* Selection Action Bar */}
       {selectedText && (
         <div className="flex items-center gap-2 p-2 bg-primary/10 border-b border-primary/20 animate-fade-in">
-          <MousePointer2 className="h-4 w-4 text-primary" />
+          <MousePointer2 className="h-4 w-4 text-primary shrink-0" />
           <span className="text-xs text-muted-foreground truncate flex-1">
-            "{selectedText.text.slice(0, 50)}{selectedText.text.length > 50 ? '...' : ''}"
+            "{selectedText.text.slice(0, 40)}{selectedText.text.length > 40 ? '...' : ''}"
           </span>
-          <Button size="sm" variant="default" onClick={handleInsertAtCursor}>
+          <Button size="sm" variant="default" onClick={handleInsertAtCursor} className="h-7 text-xs">
             <Plus className="h-3 w-3 mr-1" />
             Insert at Cursor
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setSelectedText(null)}>
+          <Button size="sm" variant="ghost" onClick={() => setSelectedText(null)} className="h-7 text-xs">
             Cancel
           </Button>
         </div>
@@ -143,24 +171,32 @@ export function ResponsePane({ responses }: ResponsePaneProps) {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
         {/* Tab Headers */}
-        <div className="border-b border-border">
-          <TabsList className="w-full justify-start rounded-none border-0 bg-transparent h-auto p-0">
+        <div className="border-b border-border overflow-x-auto">
+          <TabsList className="w-full justify-start rounded-none border-0 bg-transparent h-auto p-0 min-w-max">
             {responses.map((response, index) => (
               <TabsTrigger
                 key={`${response.provider}-${response.model}`}
                 value={response.model}
                 className={cn(
                   'rounded-none border-b-2 border-transparent data-[state=active]:border-primary',
-                  'data-[state=active]:bg-transparent px-4 py-3'
+                  'data-[state=active]:bg-transparent px-3 py-2.5 min-w-[80px]'
                 )}
               >
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono">
-                    {String.fromCharCode(65 + index)}
-                  </span>
-                  <Badge variant="outline" className={cn('text-[10px]', getProviderColor(response.provider))}>
-                    {response.provider}
-                  </Badge>
+                <div className="flex flex-col items-center gap-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {String.fromCharCode(65 + index)}
+                    </span>
+                    <Badge variant="outline" className={cn('text-[10px] px-1.5', getProviderColor(response.provider))}>
+                      {response.provider}
+                    </Badge>
+                  </div>
+                  {response.isMock && (
+                    <Badge variant="outline" className="text-[8px] px-1 py-0 h-3 text-warning border-warning/50">
+                      <Beaker className="h-2 w-2 mr-0.5" />
+                      MOCK
+                    </Badge>
+                  )}
                 </div>
               </TabsTrigger>
             ))}
@@ -168,12 +204,12 @@ export function ResponsePane({ responses }: ResponsePaneProps) {
               value="final"
               className={cn(
                 'rounded-none border-b-2 border-transparent data-[state=active]:border-primary',
-                'data-[state=active]:bg-transparent px-4 py-3 ml-auto'
+                'data-[state=active]:bg-transparent px-3 py-2.5 ml-auto'
               )}
             >
-              <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                Final
+              <div className="flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5" />
+                <span className="text-xs">Final</span>
               </div>
             </TabsTrigger>
           </TabsList>
@@ -187,36 +223,47 @@ export function ResponsePane({ responses }: ResponsePaneProps) {
             className="flex-1 m-0 flex flex-col"
           >
             {/* Response Header */}
-            <div className="flex items-center justify-between p-3 border-b border-border bg-muted/30">
-              <div className="flex items-center gap-3">
-                <Badge className={getProviderColor(response.provider)}>
-                  {response.model}
+            <div className="flex items-center justify-between p-2 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2 flex-wrap min-w-0">
+                <Badge className={cn('text-xs', getProviderColor(response.provider))}>
+                  {response.model.split('-').slice(0, 2).join('-')}
                 </Badge>
-                <span className="text-xs text-muted-foreground">
-                  {response.usage.totalTokens.toLocaleString()} tokens
-                  <span className="mx-2">•</span>
-                  {response.usage.promptTokens} prompt / {response.usage.completionTokens} completion
-                </span>
+                <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                  <span>{response.usage.totalTokens.toLocaleString()} tok</span>
+                  {response.latencyMs && (
+                    <span className="flex items-center gap-0.5">
+                      <Clock className="h-2.5 w-2.5" />
+                      {(response.latencyMs / 1000).toFixed(1)}s
+                    </span>
+                  )}
+                  {response.estimatedCost !== undefined && (
+                    <span className="flex items-center gap-0.5">
+                      <DollarSign className="h-2.5 w-2.5" />
+                      ${response.estimatedCost.toFixed(4)}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
                 <Button
                   variant="ghost"
                   size="sm"
+                  className="h-7 px-2"
                   onClick={() => handleCopy(response.content, response.model)}
                 >
                   {copiedTab === response.model ? (
-                    <Check className="h-4 w-4 text-success" />
+                    <Check className="h-3 w-3 text-success" />
                   ) : (
-                    <Copy className="h-4 w-4" />
+                    <Copy className="h-3 w-3" />
                   )}
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
+                  className="h-7 px-2"
                   onClick={() => handleAppendToFinal(response.content)}
                 >
-                  <Plus className="h-4 w-4 mr-1" />
-                  Append
+                  <Plus className="h-3 w-3" />
                 </Button>
               </div>
             </div>
@@ -236,58 +283,59 @@ export function ResponsePane({ responses }: ResponsePaneProps) {
             </ScrollArea>
             
             {/* Selection hint */}
-            <div className="px-4 py-2 border-t border-border text-xs text-muted-foreground">
-              💡 Select text and click "Insert at Cursor" to add to final draft
+            <div className="px-3 py-1.5 border-t border-border text-[10px] text-muted-foreground">
+              💡 Select text → "Insert at Cursor" to add to final draft
             </div>
           </TabsContent>
         ))}
 
         {/* Final Editor */}
         <TabsContent value="final" className="flex-1 m-0 flex flex-col">
-          <div className="flex items-center justify-between p-3 border-b border-border bg-muted/30">
+          <div className="flex items-center justify-between p-2 border-b border-border bg-muted/30">
             <div className="flex items-center gap-2">
               <FileText className="h-4 w-4" />
               <span className="text-sm font-medium">Final Draft</span>
+              {finalContent && (
+                <span className="text-xs text-muted-foreground">
+                  {finalContent.length} chars
+                </span>
+              )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               <Button
                 variant="ghost"
                 size="sm"
+                className="h-7 px-2"
                 onClick={() => handleCopy(finalContent, 'final')}
                 disabled={!finalContent}
               >
                 {copiedTab === 'final' ? (
-                  <Check className="h-4 w-4 text-success" />
+                  <Check className="h-3 w-3 text-success" />
                 ) : (
-                  <Copy className="h-4 w-4" />
+                  <Copy className="h-3 w-3" />
                 )}
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
+                className="h-7 px-2 gap-1"
                 onClick={() => handleExport('md')}
                 disabled={!finalContent}
               >
-                <Download className="h-4 w-4 mr-1" />
-                .md
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleExport('txt')}
-                disabled={!finalContent}
-              >
-                <Download className="h-4 w-4 mr-1" />
-                .txt
+                <Download className="h-3 w-3" />
+                <span className="text-xs">.md</span>
               </Button>
             </div>
           </div>
 
-          <div className="flex-1 p-4">
+          <div className="flex-1 p-3">
             <Textarea
               ref={finalTextareaRef}
               value={finalContent}
               onChange={e => setFinalContent(e.target.value)}
+              onSelect={handleFinalSelect}
+              onClick={handleFinalSelect}
+              onKeyUp={handleFinalSelect}
               placeholder="Select text from responses and click 'Insert at Cursor' to build your final draft..."
               className="h-full resize-none font-mono text-sm"
             />

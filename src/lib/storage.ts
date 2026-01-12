@@ -70,6 +70,7 @@ export interface Settings {
   showLeftPane: boolean;
   showRightPane: boolean;
   layoutPreset: LayoutPreset;
+  demoMode: boolean;
 }
 
 export interface RoutingRule {
@@ -222,6 +223,7 @@ export function getSettings(): Settings {
     showLeftPane: true,
     showRightPane: true,
     layoutPreset: 'split',
+    demoMode: false,
   });
 }
 
